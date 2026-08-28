@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+
+<head th:replace="~{fragments/layout :: head}">
+    <title>Enroll to Course</title>
+</head>
+
+<body>
+<div class="d-flex" id="wrapper">
+    <!-- Sidebar -->
+    <div th:replace="~{fragments/layout :: sidebar}"></div>
+
+    <!-- Page Content -->
+    <div id="page-content-wrapper">
+        <div th:replace="~{fragments/layout :: navbar}"></div>
+
+        <div class="container-fluid px-4 py-4">
+            <div class="bg-primary text-white rounded-3 p-4 mb-4">
+                <div class="d-flex flex-column flex-md-row align-items-start align-items-md-center justify-content-between gap-3">
+                    <div>
+                        <h2 class="mb-1">Enroll Student to Courses</h2>
+                    </div>
+                    <a th:href="@{/students/list}" class="btn btn-light text-primary fw-semibold">
+                        <i class="bi bi-arrow-left me-1"></i> Back to Students
+                    </a>
+                </div>
+            </div>
+
+            <form th:action="@{/enrollments/enrollCourse}" th:object="${enrollmentDTO}" method="post">
+                <div class="row g-4">
+                    <!-- Left: Course selection -->
+                    <div class="col-lg-8">
+                        <div class="card h-100">
+                            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                                <span><i class="bi bi-list-check me-1"></i> Course Selection</span>
+                                <span class="text-muted small">Multi-select allowed</span>
+                            </div>
+                            <div class="card-body">
+
+                                <!--errors for course ids-->
+                                <div class="invalid-feedback"
+                                     th:if="${#fields.hasErrors('courseIds')}"
+                                     th:errors="*{courseIds}">
+
+                                </div>
+
+                                <div class="table-responsive">
+                                    <table class="table table-hover align-middle">
+                                        <thead>
+                                        <tr>
+                                            <th style="width: 60px;">Select</th>
+                                            <th>Course Name</th>
+                                            <th class="text-end">Fee</th>
+                                        </tr>
+                                        </thead>
+                                        <tbody>
+                                        <!--
+                                          =======================================================================
+                                          COURSE ENROLLMENT CHECKBOX — how it binds to the form AND how JS uses it
+                                          =======================================================================
+
+                                          th:field="*{courseIds}"
+                                            - Binds this checkbox to the `courseIds` property on the form-backing
+                                              object set via th:object="${enrollmentDTO}" on the <form> tag.
+                                              (`*{courseIds}` is shorthand for `${enrollmentDTO.courseIds}`.)
+                                            - Auto-generates name="courseIds" on every checkbox in the loop — all
+                                              checkboxes SHARE the same name on purpose (see submission behavior below).
+                                            - Also auto-generates an id and a checked="checked" state IF course.id is
+                                              already present in enrollmentDTO.courseIds (relevant for edit forms;
+                                              on a fresh create form, courseIds starts empty so nothing pre-checks).
+
+                                          th:value="${course.id}"
+                                            - Uses $ (not *) because `course` is the th:each LOOP VARIABLE from
+                                              ${coursesList}, NOT a property of the form-backing object. This value
+                                              is what actually gets submitted when the box is checked.
+
+                                          th:id="|course-${course.id}|"
+                                            - `|...|` is Thymeleaf's literal substitution (string interpolation),
+                                              equivalent to 'course-' + ${course.id} -> e.g. id="course-5".
+                                            - Placed AFTER th:field so it OVERRIDES th:field's auto-generated id,
+                                              giving each checkbox a unique, predictable id for JS to target
+                                              (e.g. document.getElementById('course-5')).
+
+                                          th:data-fee / th:data-name
+                                            - Plain HTML5 data-* attributes (nothing to do with Thymeleaf form
+                                              binding or Spring). Used purely so client-side JS can read
+                                              checkbox.dataset.fee / checkbox.dataset.name and update the
+                                              "Total Fee" / "Selected Courses" summary INSTANTLY on click,
+                                              without a server round-trip.
+
+                                          -----------------------------------------------------------------------
+                                          HOW courseIds GETS "APPENDED" WHEN A BOX IS CHECKED (no JS/DOM append!)
+                                          -----------------------------------------------------------------------
+                                          1. Browser (native HTML behavior):
+                                             Multiple checkboxes sharing name="courseIds" is standard HTML — on
+                                             submit, the browser sends ONE name=value pair PER CHECKED box.
+                                             Unchecked boxes are simply omitted from the request entirely.
+                                               e.g. checking course 5 and course 9 (not 7) sends:
+                                                    courseIds=5&courseIds=9
+
+                                          2. Spring (server-side binding):
+                                             WebDataBinder collects ALL values submitted under "courseIds",
+                                             converts each String -> Long, and populates:
+                                                    List<Long> courseIds  // -> [5, 9]
+                                             on the EnrollmentDTO bean, before the @PostMapping controller method
+                                             even runs.
+
+                                          So there's no incremental "append" happening as the user clicks — it's a
+                                          one-time snapshot of whichever boxes are checked, taken at submit time.
+                                          =======================================================================
+                                        -->
+                                        <tr th:each="course : ${courseList}">
+                                            <td data-label="Select">
+                                                <div class="form-check">
+                                                    <input class="form-check-input course-checkbox" type="checkbox"
+                                                           th:field="*{courseIds}"
+                                                           th:value="${course.id}"
+                                                           th:id="|course-${course.id}|"
+                                                           th:data-fee="${course.fee}"
+                                                           th:data-name="${course.courseName}">
+                                                </div>
+                                            </td>
+
+                                            <td data-label="Course Name" th:text="${course.courseName}"></td>
+
+                                            <!--
+                                              Formats course.fee as a US-dollar currency string for display.
+
+                                              #numbers is a Thymeleaf built-in utility object (like #dates, #strings)
+                                              for number formatting without writing Java in the template.
+
+                                              formatDecimal(course.fee, 1, 'COMMA', 2, 'POINT'):
+                                                - course.fee : the raw numeric value to format
+                                                - 1          : minimum integer digits (pads leading zeros if needed)
+                                                - 'COMMA'    : thousands separator -> 1200 becomes 1,200
+                                                - 2          : always show exactly 2 decimal places
+                                                - 'POINT'    : decimal separator is '.' -> ...200.00
+
+                                              Prefixing with '$' via string concatenation turns 1200 -> "$1,200.00".
+
+                                              CAUTION: if course.fee is null, formatDecimal(null, ...) throws an
+                                              exception rather than rendering blank. Guard with th:if or ensure fee
+                                              is never null upstream (DTO/service) if that's a possibility.
+                                            -->
+                                            <td data-label="Fee" class="text-end"
+                                                th:text="${'$' + #numbers.formatDecimal(course.fee, 1, 'COMMA', 2, 'POINT')}"></td>
+                                        </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right: Student details and total -->
+                    <div class="col-lg-4">
+                        <div class="card h-100">
+                            <div class="card-header bg-white">
+                                <i class="bi bi-person-check me-1"></i> Student & Summary
+                            </div>
+                            <div class="card-body d-flex flex-column gap-3">
+                                <div>
+                                    <label for="studentSelect" class="form-label">Select Student</label>
+                                    <select id="studentSelect" class="form-select mb-2" th:field="*{studentId}"
+                                       th:classappend="${#fields.hasErrors('studentId')} ? 'is-invalid' : ''">
+                                        <option value="" selected>Select a student</option>
+                                        <option th:each="student : ${studentList}"
+                                                th:value="${student.id}"
+                                                th:data-name="${student.firstName + ' ' + student.lastName}"
+                                                th:data-email="${student.email}"
+                                                th:text="${student.firstName + ' ' + student.lastName + ' (' + student.email + ')'}"
+                                        ></option>
+                                    </select>
+
+                                    <!--Error for Student Id-->
+                                    <div class="invalid-feedback"
+                                         th:if="${#fields.hasErrors('studentId')}"
+                                         th:errors="*{studentId}">
+
+                                    </div>
+
+                                    <div class="p-3 bg-light border rounded">
+                                        <div class="text-muted small">Selected Student</div>
+                                        <div class="fw-semibold mb-0" id="selectedStudent"></div>
+                                        <div class="small text-muted" id="selectedEmail"></div>
+                                    </div>
+                                </div>
+
+                                <div class="p-3 bg-light border rounded">
+                                    <div class="d-flex justify-content-between mb-1">
+                                        <span class="text-muted">Courses Selected</span>
+                                        <strong id="selectedCourseCount"></strong>
+                                    </div>
+                                    <div class="d-flex justify-content-between">
+                                        <span class="text-muted">Total Fee</span>
+                                        <strong class="text-primary" id="totalFees"></strong>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <div class="text-muted small mb-1">Selected Courses</div>
+                                    <ul class="mb-3" id="selectedCourses">
+                                        <li>No course selected</li>
+                                    </ul>
+                                    <div class="d-flex flex-wrap gap-2">
+                                        <button class="btn btn-outline-secondary flex-grow-1">
+                                            <i class="bi bi-arrow-left me-1"></i> Cancel
+                                        </button>
+                                        <button type="submit" class="btn btn-primary flex-grow-1">
+                                            <i class="bi bi-check2-circle me-1"></i> Enroll
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+
+<!--
+  ===========================================================================
+  th:inline="javascript" — embedding server-side values inside a <script>
+  ===========================================================================
+
+  WHY IT'S NEEDED:
+    Normally ${...} / *{...} expressions only work inside Thymeleaf HTML
+    ATTRIBUTES (th:text, th:value, etc.) — NOT inside a raw <script> block.
+    Without th:inline, a raw expression there would ship as-is and be
+    invalid JS in the browser.
+
+  SYNTAX (reference only — see below for why no live example is written here):
+    A JS block comment wrapping double square brackets around a Thymeleaf
+    expression, followed by a fallback JS value. Thymeleaf evaluates the
+    expression server-side and REPLACES the whole comment+placeholder with
+    the real value at render time. The fallback value is used only if this
+    HTML file is opened directly in a browser, outside Spring/Thymeleaf
+    rendering (keeps the JS syntactically valid for static preview).
+
+  COMPLEX OBJECTS (lists/DTOs) GET AUTO-SERIALIZED TO JSON when inlined this
+  way — e.g. a List<CourseDTO> becomes a real JS array of objects, usable
+  directly (courses[0].fee) instead of scraping data-* attributes off each
+  checkbox in the DOM.-->
+
+
+ <script th:inline="javascript">
+
+
+    /*
+     * ===========================================================================
+     * ENROLLMENT SUMMARY SCRIPT — recalculates count/total/list on checkbox change
+     * ===========================================================================
+     *
+     * SETUP (runs once when the script loads):
+     *
+     * checkboxes
+     *   - document.querySelectorAll(".course-checkbox") grabs EVERY element
+     *     matching that CSS class as a NodeList (array-like collection).
+     *     Since every course checkbox in the table shares this class, this
+     *     captures all of them at once (e.g. 5 courses -> 5 <input> elements).
+     *
+     * selectedCourseCount / totalFees / selectedCourses
+     *   - document.getElementById(id) grabs a single element by its unique id,
+     *     matching the <strong id="selectedCourseCount">, <strong id="totalFees">,
+     *     and <ul id="selectedCourses"> elements defined in the HTML.
+     *
+     * updateSummary() — the core logic (defined here, executed later on events)
+     *
+     *   let selected = []; let total = 0;
+     *     - Local state, reset to empty/zero EVERY time the function runs, so
+     *       each call recalculates everything from scratch (no incremental
+     *       add/remove bookkeeping needed).
+     *
+     *   checkboxes.forEach(cb => { if (cb.checked) { ... } })
+     *     - Loops over every checkbox ("cb" = current one). cb.checked is a
+     *       native DOM boolean property: true if that box is currently ticked.
+     *       Only checked boxes proceed into the block below.
+     *
+     *   selected.push({ name: cb.dataset.name, fee: cb.dataset.fee })
+     *     - cb.dataset.* is the standard JS API for reading any data-* HTML
+     *       attribute (data-name -> dataset.name, data-fee -> dataset.fee).
+     *       Builds one { name, fee } object per checked course and collects
+     *       it into the `selected` array.
+     *
+     *   const fee = parseFloat(cb.dataset.fee || "0"); total = total + fee;
+     *     - dataset.fee is always a STRING (all data-* attrs are strings),
+     *       e.g. "1200.00" -- parseFloat() converts it to a real number so
+     *       math works. `|| "0"` guards against undefined/empty values
+     *       becoming NaN. Running total accumulates the sum of checked fees.
+     *
+     *   selectedCourseCount.textContent = selected.length.toString();
+     *     - selected.length = count of checked courses. .textContent sets
+     *       the visible text of the count badge. .toString() is explicit
+     *       (the browser would coerce the number anyway).
+     *
+     *   totalFees.textContent = "$" + total;
+     *     - NOTE: no decimal/comma formatting here (unlike the Thymeleaf
+     *       #numbers.formatDecimal used server-side) -- may render as "$2100"
+     *       instead of "$2,100.00". Use total.toFixed(2) (+ manual comma
+     *       formatting) to match that polish if needed.
+     *
+     *   selectedCourses.innerHTML = "";
+     *     - Clears any previously rendered <li> entries before rebuilding,
+     *       so re-running this doesn't keep appending duplicates.
+     *
+     *   if (selected.length == 0) { ...show "No course selected"... }
+     *   else { selected.forEach(item => { create <li>, set text, append }) }
+     *     - document.createElement("li") builds a new element in memory
+     *       (not yet on the page). Template literal `${item.name} ${item.fee}`
+     *       embeds the values directly into the <li>'s text. appendChild()
+     *       inserts it as the last child of the (intended) <ul>.
+     *
+     *
+     * EVENT WIRING (runs once, at page load):
+     *
+     * document.addEventListener("DOMContentLoaded", () => { ... })
+     *   - Fires once the browser has fully parsed the HTML -- the safe point
+     *     to start querying/attaching to elements.
+     *
+     * checkboxes.forEach(cb => cb.addEventListener("change", updateSummary))
+     *   - Attaches a "change" listener to EVERY checkbox: whenever any one
+     *     of them is checked/unchecked, updateSummary() runs again, fully
+     *     recalculating the summary from the current state of all boxes.
+     *
+     *
+     * FULL FLOW:
+     *   Page loads
+     *     -> DOMContentLoaded fires -> attaches "change" listener to each checkbox
+     *     -> user checks/unchecks a box
+     *     -> "change" event fires -> updateSummary() runs
+     *     -> re-scans ALL checkboxes -> rebuilds selected[], recomputes total
+     *     -> rewrites count text, total text, and the <li> list from scratch
+     * ===========================================================================
+     */
+
+    const checkboxes = document.querySelectorAll(".course-checkbox");
+    const selectedCourseCount = document.getElementById("selectedCourseCount");
+    const totalFees = document.getElementById("totalFees");
+    const selectedCourses = document.getElementById("selectedCourses");
+    const selectedStudent = document.getElementById("selectedStudent");
+    const selectedEmail = document.getElementById("selectedEmail");
+    const studentSelect = document.getElementById("studentSelect");
+
+    function updateSummary() {
+        let selected = [];
+        let total = 0;
+        checkboxes.forEach(cb => {
+            if (cb.checked) {
+                selected.push({
+                    name: cb.dataset.name,
+                    fee: cb.dataset.fee
+                })
+
+                const fee = parseFloat(cb.dataset.fee || "0")
+                total = total + fee;
+            }
+        });
+
+        selectedCourseCount.textContent = selected.length.toString();
+        totalFees.textContent = "$" + total;
+
+        selectedCourses.innerHTML = "";
+        if (selected.length == 0) {
+            selectedCourses.innerHTML = "<li>No course selected</li>";
+        } else {
+            selected.forEach(item => {
+                const li = document.createElement("li");
+                li.textContent = `${item.name} ${item.fee}`
+                selectedCourses.appendChild(li);
+            });
+        }
+    }
+
+          /*
+             * ===========================================================================
+             * updateStudent() — refreshes "Selected Student" / email display on dropdown change
+             * ===========================================================================
+             *
+             * studentSelect && studentSelect.value ? ... : null
+             *   - studentSelect && ...   : GUARD CLAUSE. document.getElementById() returns
+             *     null if no element with that id exists (typo, removed element, wrong
+             *     page, etc). && short-circuits: if studentSelect is null (falsy), JS
+             *     never evaluates studentSelect.value, avoiding a crash
+             *     ("Cannot read properties of null (reading 'value')"). Mostly a
+             *     defensive-programming habit here since the <select> is always present
+             *     on this page, but it prevents a hard crash if that ever changes.
+             *   - studentSelect.value    : the currently selected <option>'s value
+             *     attribute (a string = student.id). The default placeholder option
+             *     (<option value="" selected>) has an EMPTY string value, which is
+             *     falsy in JS -- so if the user hasn't picked a real student yet, this
+             *     whole condition is false and the ternary goes to the : null branch.
+             *
+             * studentSelect.options[studentSelect.selectedIndex]
+             *   - .options is a live collection of every <option> inside the <select>.
+             *   - .selectedIndex is the numeric index (0, 1, 2...) of whichever option
+             *     is currently chosen.
+             *   - Combined, this returns the ACTUAL selected <option> DOM ELEMENT --
+             *     not just its .value -- because only the element itself gives access
+             *     to its data-name / data-email attributes (set server-side via
+             *     th:data-name / th:data-email). .value alone only exposes value="".
+             *
+             * studentValues
+             *   - The selected <option> element if a real student is chosen, otherwise
+             *     null (nothing selected, or studentSelect wasn't found).
+             *
+             * selectedStudent.textContent = studentValues ? studentValues.dataset.name : '';
+             * selectedEmail.textContent   = studentValues ? studentValues.dataset.email : '';
+             *   - If a real option was found: read .dataset.name / .dataset.email off
+             *     it (reads the data-* attributes) and display them.
+             *   - If null: clear the text back to empty -- handles the case where the
+             *     user re-selects the "Select a student" placeholder, resetting the
+             *     summary instead of leaving stale info on screen.
+             *
+             * EVENT WIRING:
+             *   if (studentSelect) { studentSelect.addEventListener("change", updateStudent) }
+             *     - Same null-guard reasoning as above: only attach the listener if the
+             *       element actually exists. The <select>'s native "change" event fires
+             *       whenever the user picks a DIFFERENT option, triggering a full
+             *       re-read of the current selection (same "recalculate from scratch"
+             *       pattern as updateSummary() for checkboxes, just for a single-select
+             *       dropdown instead of multiple checkboxes).
+             * ===========================================================================
+          */
+
+    function updateStudent() {
+      const studentValues = studentSelect && studentSelect.value ? studentSelect.options[studentSelect.selectedIndex]: null;
+      selectedStudent.textContent = studentValues ? studentValues.dataset.name : '';
+      selectedEmail.textContent = studentValues ? studentValues.dataset.email : '';
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        checkboxes.forEach(cb => cb.addEventListener("change", updateSummary))
+        if(studentSelect) {
+            studentSelect.addEventListener("change", updateStudent)
+        }
+
+    });
+</script>
+</body>
+
+</html>
